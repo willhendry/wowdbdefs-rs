@@ -46,7 +46,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! wowdbdefs-rs = "0.1.0"
+//! wowdbdefs-rs = "0.2.0"
 //! ```
 //!
 //! # MSRV
@@ -130,6 +130,10 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/WoWDBDefs/definitions/Map.dbd"
     ));
+    const AREA_TABLE_CONTENTS: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/WoWDBDefs/definitions/AreaTable.dbd"
+    ));
 
     #[test]
     fn test_write() {
@@ -145,6 +149,55 @@ mod tests {
 
         let tbc = f.specific_version(&Version::new(2, 4, 3, 8606));
         assert!(tbc.is_some());
+    }
+
+    #[test]
+    fn parses_all_comma_separated_builds_and_layouts() {
+        const CONTENTS: &str = "COLUMNS\nint ID\nLAYOUT 00000001, 9995B797\nBUILD 1.60.1.69876, 1.60.1.70009\n$id$ID<32>\n";
+        let file = load_file_from_string(CONTENTS, "AreaTable.dbd").unwrap();
+        let definition = file
+            .specific_version(&Version::new(1, 60, 1, 70009))
+            .unwrap();
+
+        assert!(definition.layouts.contains(&crate::Layout::new(1)));
+        assert!(definition
+            .layouts
+            .contains(&crate::Layout::new(0x9995_B797)));
+    }
+
+    #[test]
+    fn selects_installed_area_table_build_and_preserves_column_order() {
+        let file = load_file_from_string(AREA_TABLE_CONTENTS, "AreaTable.dbd").unwrap();
+        let definition = file
+            .specific_version(&Version::new(1, 60, 1, 70009))
+            .expect("the installed build must have an AreaTable definition");
+
+        assert_eq!(
+            definition.layouts.iter().next().map(|layout| layout.inner),
+            Some(0x9995_B797)
+        );
+        assert_eq!(
+            definition.entries.first().map(|entry| entry.name.as_str()),
+            Some("ID")
+        );
+        assert!(!definition.entries[0].inline);
+        assert!(definition.entries[0].primary_key);
+        assert_eq!(file.column_order.first().map(String::as_str), Some("ID"));
+        assert_eq!(
+            file.column_order.get(9).map(String::as_str),
+            Some("ZoneName")
+        );
+        assert_eq!(
+            file.column_order.get(12).map(String::as_str),
+            Some("AreaName_lang")
+        );
+
+        let serialized = write_to_file(&file);
+        let columns = &serialized[..serialized.find("\n\n").unwrap()];
+        let id_position = columns.find("int ID").unwrap();
+        let zone_position = columns.find("string ZoneName").unwrap();
+        let area_name_position = columns.find("locstring AreaName_lang").unwrap();
+        assert!(id_position < zone_position && zone_position < area_name_position);
     }
 
     #[test]

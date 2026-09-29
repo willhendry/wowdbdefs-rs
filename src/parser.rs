@@ -97,6 +97,16 @@ pub(crate) fn parse_file(contents: &str, name: String) -> Result<RawDbdFile, Par
         }
     }
 
+    if matches!(mode, Mode::Entry) {
+        normalize_versions(&mut versions, &version_ranges);
+        file.add_database(RawDefinition::new(
+            versions,
+            version_ranges,
+            layouts,
+            entries,
+        ));
+    }
+
     Ok(file)
 }
 
@@ -333,55 +343,30 @@ fn parse_builds(
 
         if let Some(b) = line.strip_prefix("BUILD ") {
             const BUILD_OFFSET: usize = 6;
-            if let Some((first, mut b)) = b.split_once(',') {
-                versions.insert(string_to_version(first.trim(), line_count, BUILD_OFFSET)?);
-
-                while let Some(i) = b.find(',') {
-                    versions.insert(string_to_version(b[..i].trim(), line_count, i)?);
-
-                    b = &b[i + 1..];
+            for build in b.split(',').map(str::trim) {
+                let column = line.find(build).unwrap_or(BUILD_OFFSET);
+                if let Some((from, to)) = build.split_once('-') {
+                    let from_column = line.find(from).unwrap_or(column);
+                    let to_column = line.find(to).unwrap_or(from_column + from.len() + 1);
+                    version_ranges.push(VersionRange::new(
+                        string_to_version(from.trim(), line_count, from_column)?,
+                        string_to_version(to.trim(), line_count, to_column)?,
+                    ));
+                } else {
+                    versions.insert(string_to_version(build, line_count, column)?);
                 }
-            } else if b.contains('-') {
-                let i = b.find('-').unwrap();
-
-                let from = string_to_version(&b[..i], line_count, BUILD_OFFSET)?;
-                let to = string_to_version(&b[i + 1..], line_count, BUILD_OFFSET + i + 1)?;
-
-                version_ranges.push(VersionRange::new(from, to));
-            } else {
-                versions.insert(string_to_version(b, line_count, BUILD_OFFSET)?);
             }
-        } else if let Some(mut b) = line.strip_prefix("LAYOUT ") {
-            if b.contains(',') {
-                while let Some(i) = b.find(',') {
-                    let value = match u32::from_str_radix(&b[..i], 16) {
-                        Ok(i) => i,
-                        Err(_) => {
-                            return Err(ParseError::new(
-                                i,
-                                line_count,
-                                DbdErrorReason::InvalidLayout(b[..i].to_string()),
-                            ));
-                        }
-                    };
-                    b = &b[..i];
-
-                    layouts.insert(Layout::new(value));
-                }
-            } else {
-                const LAYOUT_SPACE_OFFSET: usize = 7;
-
-                let value = match u32::from_str_radix(b, 16) {
-                    Ok(i) => i,
-                    Err(_) => {
-                        return Err(ParseError::new(
-                            LAYOUT_SPACE_OFFSET,
-                            line_count,
-                            DbdErrorReason::InvalidLayout(b.to_string()),
-                        ));
-                    }
-                };
-
+        } else if let Some(b) = line.strip_prefix("LAYOUT ") {
+            const LAYOUT_SPACE_OFFSET: usize = 7;
+            for layout in b.split(',').map(str::trim) {
+                let column = line.find(layout).unwrap_or(LAYOUT_SPACE_OFFSET);
+                let value = u32::from_str_radix(layout, 16).map_err(|_| {
+                    ParseError::new(
+                        column,
+                        line_count,
+                        DbdErrorReason::InvalidLayout(layout.to_owned()),
+                    )
+                })?;
                 layouts.insert(Layout::new(value));
             }
         } else {
@@ -436,7 +421,7 @@ fn string_to_version(s: &str, line_count: usize, column: usize) -> Result<Versio
     };
 
     let build = if let Some(s) = split.next() {
-        if let Ok(s) = s.parse::<u16>() {
+        if let Ok(s) = s.parse::<u32>() {
             s
         } else {
             return err();
@@ -444,6 +429,9 @@ fn string_to_version(s: &str, line_count: usize, column: usize) -> Result<Versio
     } else {
         return err();
     };
+    if split.next().is_some() {
+        return err();
+    }
 
     Ok(Version::new(major, minor, patch, build))
 }

@@ -16,6 +16,8 @@ pub struct RawDbdFile {
     pub name: String,
     /// Column definitions found under `COLUMNS`.
     pub columns: HashMap<String, RawColumn>,
+    /// Column names in the order they appear under `COLUMNS`.
+    pub column_order: Vec<String>,
     /// Individual definitions, including versioning and layouts.
     pub definitions: Vec<RawDefinition>,
 }
@@ -64,6 +66,7 @@ impl RawDbdFile {
 
         Ok(DbdFile {
             name: self.name,
+            column_order: self.column_order,
             definitions,
         })
     }
@@ -77,10 +80,14 @@ impl RawDbdFile {
         Self {
             name,
             columns: HashMap::new(),
+            column_order: vec![],
             definitions: vec![],
         }
     }
     pub(crate) fn add_column(&mut self, column: RawColumn) {
+        if !self.columns.contains_key(&column.name) {
+            self.column_order.push(column.name.clone());
+        }
         self.columns.insert(column.name.clone(), column);
     }
 
@@ -193,7 +200,7 @@ pub struct Version {
     /// Patch version.
     pub patch: u8,
     /// Build version. 5875 for 1.12.1 and 12340 for 3.3.5 for example.
-    pub build: u16,
+    pub build: u32,
 }
 
 impl Ord for Version {
@@ -231,7 +238,7 @@ impl Display for Version {
 
 impl Version {
     /// Constructor for version.
-    pub const fn new(major: u8, minor: u8, patch: u8, build: u16) -> Self {
+    pub const fn new(major: u8, minor: u8, patch: u8, build: u32) -> Self {
         Self {
             major,
             minor,
@@ -564,6 +571,8 @@ pub struct DbdFile {
     ///
     /// Can not be assumed to always be correct since [`load_file_from_string`](crate::load_file_from_string) can provide an invalid name.
     pub name: String,
+    /// Column names in the order they appear under `COLUMNS`.
+    pub column_order: Vec<String>,
     /// Parsed and validated definitions.
     pub definitions: Vec<Definition>,
 }

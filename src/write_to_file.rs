@@ -1,5 +1,6 @@
 use crate::writer::Writer;
-use crate::RawDbdFile;
+use crate::{RawColumn, RawDbdFile};
+use std::collections::HashSet;
 
 /// Write the [`RawDbdFile`] to a string in the `.dbd` format.
 ///
@@ -8,26 +9,16 @@ pub fn write_to_file(file: &RawDbdFile) -> String {
     let mut s = Writer::new();
     s.wln("COLUMNS");
 
-    for column in file.columns.values() {
-        let foreign_key = if let Some(foreign_key) = &column.foreign_key {
-            foreign_key.to_string()
-        } else {
-            "".to_string()
-        };
-
-        s.w(format!(
-            "{ty}{foreign_key} {name}",
-            ty = column.ty,
-            name = column.name
-        ));
-        if !column.verified {
-            s.w("?");
+    let mut written_columns = HashSet::new();
+    for name in &file.column_order {
+        if let Some(column) = file.columns.get(name) {
+            write_column(&mut s, column);
+            written_columns.insert(name.as_str());
         }
-
-        if let Some(comment) = &column.comment {
-            s.wln(format!(" // {}", comment));
-        } else {
-            s.newline();
+    }
+    for column in file.columns.values() {
+        if written_columns.insert(column.name.as_str()) {
+            write_column(&mut s, column);
         }
     }
 
@@ -108,4 +99,26 @@ pub fn write_to_file(file: &RawDbdFile) -> String {
     }
 
     s.inner
+}
+
+fn write_column(writer: &mut Writer, column: &RawColumn) {
+    let foreign_key = column
+        .foreign_key
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_default();
+    writer.w(format!(
+        "{ty}{foreign_key} {name}",
+        ty = column.ty,
+        name = column.name
+    ));
+    if !column.verified {
+        writer.w("?");
+    }
+
+    if let Some(comment) = &column.comment {
+        writer.wln(format!(" // {}", comment));
+    } else {
+        writer.newline();
+    }
 }
